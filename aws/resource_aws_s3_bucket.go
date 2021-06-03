@@ -2418,6 +2418,64 @@ func flattenAwsS3BucketReplicationConfiguration(r *s3.ReplicationConfiguration) 
 	return replication_configuration
 }
 
+func buildAwsS3BucketReplicationConfiguration(c map[string]interface{}) *s3.ReplicationConfiguration {
+	rc := &s3.ReplicationConfiguration{}
+	if val, ok := c["role"]; ok {
+		rc.Role = aws.String(val.(string))
+	}
+
+	rcRules := c["rules"].(*schema.Set).List()
+	rules := []*s3.ReplicationRule{}
+	for _, v := range rcRules {
+		rr := v.(map[string]interface{})
+		rcRule := &s3.ReplicationRule{
+			Prefix: aws.String(rr["prefix"].(string)),
+			Status: aws.String(rr["status"].(string)),
+		}
+
+		if rrid, ok := rr["id"]; ok {
+			rcRule.ID = aws.String(rrid.(string))
+		}
+
+		ruleDestination := &s3.Destination{}
+		if dest, ok := rr["destination"].(*schema.Set); ok && dest.Len() > 0 {
+			bd := dest.List()[0].(map[string]interface{})
+			ruleDestination.Bucket = aws.String(bd["bucket"].(string))
+
+			if storageClass, ok := bd["storage_class"]; ok && storageClass != "" {
+				ruleDestination.StorageClass = aws.String(storageClass.(string))
+			}
+
+			if replicaKmsKeyId, ok := bd["replica_kms_key_id"]; ok && replicaKmsKeyId != "" {
+				ruleDestination.EncryptionConfiguration = &s3.EncryptionConfiguration{
+					ReplicaKmsKeyID: aws.String(replicaKmsKeyId.(string)),
+				}
+			}
+		}
+		rcRule.Destination = ruleDestination
+
+		if ssc, ok := rr["source_selection_criteria"].(*schema.Set); ok && ssc.Len() > 0 {
+			sscValues := ssc.List()[0].(map[string]interface{})
+			ruleSsc := &s3.SourceSelectionCriteria{}
+			if sseKms, ok := sscValues["sse_kms_encrypted_objects"].(*schema.Set); ok && sseKms.Len() > 0 {
+				sseKmsValues := sseKms.List()[0].(map[string]interface{})
+				sseKmsEncryptedObjects := &s3.SseKmsEncryptedObjects{}
+				if sseKmsValues["enabled"].(bool) {
+					sseKmsEncryptedObjects.Status = aws.String(s3.SseKmsEncryptedObjectsStatusEnabled)
+				} else {
+					sseKmsEncryptedObjects.Status = aws.String(s3.SseKmsEncryptedObjectsStatusDisabled)
+				}
+				ruleSsc.SseKmsEncryptedObjects = sseKmsEncryptedObjects
+			}
+			rcRule.SourceSelectionCriteria = ruleSsc
+		}
+		rules = append(rules, rcRule)
+	}
+
+	rc.Rules = rules
+	return rc
+}
+
 func normalizeRoutingRules(w []*s3.RoutingRule) (string, error) {
 	withNulls, err := json.Marshal(w)
 	if err != nil {
